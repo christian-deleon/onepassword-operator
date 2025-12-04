@@ -7,6 +7,12 @@ import (
 	sdk "github.com/1password/onepassword-sdk-go"
 )
 
+// ItemSection represents a section within a 1Password item.
+type ItemSection struct {
+	ID    string
+	Title string
+}
+
 // Item represents 1Password item.
 type Item struct {
 	ID        string
@@ -14,6 +20,7 @@ type Item struct {
 	Version   int
 	Tags      []string
 	Fields    []ItemField
+	Sections  []ItemSection
 	Files     []File
 	CreatedAt time.Time
 }
@@ -26,10 +33,37 @@ func (i *Item) FromConnectItem(item *connect.Item) {
 
 	i.Tags = append(i.Tags, item.Tags...)
 
+	// Build sections map from field references (Connect doesn't have a top-level sections array)
+	sectionMap := make(map[string]ItemSection)
 	for _, field := range item.Fields {
+		if field.Section != nil {
+			sectionID := field.Section.ID
+			if _, exists := sectionMap[sectionID]; !exists {
+				sectionMap[sectionID] = ItemSection{
+					ID:    field.Section.ID,
+					Title: field.Section.Label,
+				}
+			}
+		}
+	}
+	// Convert map to slice
+	i.Sections = make([]ItemSection, 0, len(sectionMap))
+	for _, section := range sectionMap {
+		i.Sections = append(i.Sections, section)
+	}
+
+	// Preserve fields with section and type metadata
+	for _, field := range item.Fields {
+		sectionID := ""
+		if field.Section != nil {
+			sectionID = field.Section.ID
+		}
 		i.Fields = append(i.Fields, ItemField{
-			Label: field.Label,
-			Value: field.Value,
+			ID:        field.ID,
+			Label:     field.Label,
+			Value:     field.Value,
+			SectionID: sectionID,
+			FieldType: string(field.Type),
 		})
 	}
 
@@ -53,10 +87,27 @@ func (i *Item) FromSDKItem(item *sdk.Item) {
 	i.Tags = make([]string, len(item.Tags))
 	copy(i.Tags, item.Tags)
 
+	// Preserve sections
+	i.Sections = make([]ItemSection, len(item.Sections))
+	for idx, section := range item.Sections {
+		i.Sections[idx] = ItemSection{
+			ID:    section.ID,
+			Title: section.Title,
+		}
+	}
+
+	// Preserve fields with section and type metadata
 	for _, field := range item.Fields {
+		sectionID := ""
+		if field.SectionID != nil {
+			sectionID = *field.SectionID
+		}
 		i.Fields = append(i.Fields, ItemField{
-			Label: field.Title,
-			Value: field.Value,
+			ID:        field.ID,
+			Label:     field.Title,
+			Value:     field.Value,
+			SectionID: sectionID,
+			FieldType: string(field.FieldType),
 		})
 	}
 

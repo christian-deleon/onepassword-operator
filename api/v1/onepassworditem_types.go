@@ -31,12 +31,40 @@ import (
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
+// SecretTemplate defines a custom structure for the K8s secret data using Go templates.
+type SecretTemplate struct {
+	// Data maps secret keys to Go template strings.
+	// Templates have access to .Fields (map[string]string), .Sections (map[string]map[string]string),
+	// and .FieldsByID (map[string]string) for accessing 1Password item data.
+	Data map[string]string `json:"data,omitempty"`
+}
+
+// ImagePullSecretConfig configures automatic dockerconfigjson generation for image pull secrets.
+type ImagePullSecretConfig struct {
+	// RegistryField is the 1Password field name containing the registry URL.
+	RegistryField string `json:"registryField,omitempty"`
+	// UsernameField is the 1Password field name containing the username.
+	UsernameField string `json:"usernameField,omitempty"`
+	// PasswordField is the 1Password field name containing the password.
+	PasswordField string `json:"passwordField,omitempty"`
+	// EmailField is the 1Password field name containing the email (optional).
+	EmailField string `json:"emailField,omitempty"`
+}
+
 // OnePasswordItemSpec defines the desired state of OnePasswordItem
 type OnePasswordItemSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
 	ItemPath string `json:"itemPath,omitempty"`
+
+	// Template defines custom structure for the K8s secret data using Go templates.
+	// +optional
+	Template *SecretTemplate `json:"template,omitempty"`
+
+	// ImagePullSecret configures automatic dockerconfigjson generation.
+	// +optional
+	ImagePullSecret *ImagePullSecretConfig `json:"imagePullSecret,omitempty"`
 }
 
 type OnePasswordItemConditionType string

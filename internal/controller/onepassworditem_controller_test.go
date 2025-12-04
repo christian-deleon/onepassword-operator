@@ -423,4 +423,162 @@ var _ = Describe("OnePasswordItem controller", func() {
 			})
 		})
 	})
+
+	Context("Template support", func() {
+		It("Should create secret with templated data", func() {
+			ctx := context.Background()
+			item := item1.ToModel()
+			item.Fields = []model.ItemField{
+				{ID: "field-1", Label: "aws_access_key_id", Value: "AKIAIOSFODNN7EXAMPLE"},
+				{ID: "field-2", Label: "aws_secret_access_key", Value: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"},
+				{ID: "field-3", Label: "endpoint", Value: "https://minio.example.com"},
+			}
+			mockGetItemByIDFunc.Return(item, nil)
+
+			spec := onepasswordv1.OnePasswordItemSpec{
+				ItemPath: item1.Path,
+				Template: &onepasswordv1.SecretTemplate{
+					Data: map[string]string{
+						"connection": `provider: AWS
+region: us-east-1
+aws_access_key_id: {{ .Fields.aws_access_key_id }}
+aws_secret_access_key: {{ .Fields.aws_secret_access_key }}
+endpoint: {{ .Fields.endpoint }}
+path_style: true`,
+					},
+				},
+			}
+
+			key := types.NamespacedName{
+				Name:      "minio-connection",
+				Namespace: namespace,
+			}
+
+			toCreate := &onepasswordv1.OnePasswordItem{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      key.Name,
+					Namespace: key.Namespace,
+				},
+				Spec: spec,
+			}
+
+			By("Creating a new OnePasswordItem with template")
+			Expect(k8sClient.Create(ctx, toCreate)).Should(Succeed())
+
+			By("Verifying the K8s secret has templated data")
+			createdSecret := &v1.Secret{}
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, key, createdSecret)
+				return err == nil
+			}, timeout, interval).Should(BeTrue())
+
+			Expect(createdSecret.Data).To(HaveKey("connection"))
+			connectionData := string(createdSecret.Data["connection"])
+			Expect(connectionData).To(ContainSubstring("provider: AWS"))
+			Expect(connectionData).To(ContainSubstring("aws_access_key_id: AKIAIOSFODNN7EXAMPLE"))
+			Expect(connectionData).To(ContainSubstring("aws_secret_access_key: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"))
+			Expect(connectionData).To(ContainSubstring("endpoint: https://minio.example.com"))
+		})
+	})
+
+	Context("ImagePullSecret support", func() {
+		It("Should create dockerconfigjson secret from imagePullSecret config", func() {
+			ctx := context.Background()
+			item := item1.ToModel()
+			item.Fields = []model.ItemField{
+				{ID: "field-1", Label: "registry", Value: "ghcr.io"},
+				{ID: "field-2", Label: "username", Value: "testuser"},
+				{ID: "field-3", Label: "password", Value: "testpass"},
+				{ID: "field-4", Label: "email", Value: "user@example.com"},
+			}
+			mockGetItemByIDFunc.Return(item, nil)
+
+			spec := onepasswordv1.OnePasswordItemSpec{
+				ItemPath: item1.Path,
+				ImagePullSecret: &onepasswordv1.ImagePullSecretConfig{
+					RegistryField: "registry",
+					UsernameField: "username",
+					PasswordField: "password",
+					EmailField:    "email",
+				},
+			}
+
+			key := types.NamespacedName{
+				Name:      "ghcr-pull-secret",
+				Namespace: namespace,
+			}
+
+			toCreate := &onepasswordv1.OnePasswordItem{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      key.Name,
+					Namespace: key.Namespace,
+				},
+				Spec: spec,
+			}
+
+			By("Creating a new OnePasswordItem with imagePullSecret")
+			Expect(k8sClient.Create(ctx, toCreate)).Should(Succeed())
+
+			By("Verifying the K8s secret has dockerconfigjson data")
+			createdSecret := &v1.Secret{}
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, key, createdSecret)
+				return err == nil
+			}, timeout, interval).Should(BeTrue())
+
+			Expect(createdSecret.Data).To(HaveKey(".dockerconfigjson"))
+			Expect(createdSecret.Type).To(Equal(v1.SecretTypeDockerConfigJson))
+
+			// Verify the dockerconfigjson contains the registry
+			dockerConfigJSON := string(createdSecret.Data[".dockerconfigjson"])
+			Expect(dockerConfigJSON).To(ContainSubstring("ghcr.io"))
+			Expect(dockerConfigJSON).To(ContainSubstring("testuser"))
+		})
+
+		It("Should automatically set secret type to dockerconfigjson when imagePullSecret is configured", func() {
+			ctx := context.Background()
+			item := item1.ToModel()
+			item.Fields = []model.ItemField{
+				{ID: "field-1", Label: "registry", Value: "docker.io"},
+				{ID: "field-2", Label: "username", Value: "user"},
+				{ID: "field-3", Label: "password", Value: "pass"},
+			}
+			mockGetItemByIDFunc.Return(item, nil)
+
+			spec := onepasswordv1.OnePasswordItemSpec{
+				ItemPath: item1.Path,
+				ImagePullSecret: &onepasswordv1.ImagePullSecretConfig{
+					RegistryField: "registry",
+					UsernameField: "username",
+					PasswordField: "password",
+				},
+			}
+
+			key := types.NamespacedName{
+				Name:      "auto-dockerconfigjson",
+				Namespace: namespace,
+			}
+
+			toCreate := &onepasswordv1.OnePasswordItem{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      key.Name,
+					Namespace: key.Namespace,
+				},
+				Spec: spec,
+				// Type is not explicitly set
+			}
+
+			By("Creating a new OnePasswordItem with imagePullSecret but no type")
+			Expect(k8sClient.Create(ctx, toCreate)).Should(Succeed())
+
+			By("Verifying the secret type is automatically set to dockerconfigjson")
+			createdSecret := &v1.Secret{}
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, key, createdSecret)
+				return err == nil
+			}, timeout, interval).Should(BeTrue())
+
+			Expect(createdSecret.Type).To(Equal(v1.SecretTypeDockerConfigJson))
+		})
+	})
 })

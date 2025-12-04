@@ -90,6 +90,104 @@ func TestItem_FromSDKItem(t *testing.T) {
 	require.Equal(t, sdkItem.CreatedAt, item.CreatedAt)
 }
 
+func TestItem_FromSDKItem_WithSections(t *testing.T) {
+	sectionID := "section-1"
+	sectionIDPtr := &sectionID
+	sdkItem := &sdk.Item{
+		ID:      "test-item-id",
+		VaultID: "test-vault-id",
+		Version: 1,
+		Tags:    []string{"tag1"},
+		Fields: []sdk.ItemField{
+			{
+				ID:        "field-1",
+				Title:     "username",
+				Value:     "testuser",
+				SectionID: sectionIDPtr,
+				FieldType: sdk.ItemFieldTypeText,
+			},
+			{
+				ID:        "field-2",
+				Title:     "password",
+				Value:     "testpass",
+				SectionID: sectionIDPtr,
+				FieldType: sdk.ItemFieldTypeConcealed,
+			},
+		},
+		Sections: []sdk.ItemSection{
+			{
+				ID:    "section-1",
+				Title: "Credentials",
+			},
+		},
+		CreatedAt: time.Now(),
+	}
+
+	item := &Item{}
+	item.FromSDKItem(sdkItem)
+
+	require.Len(t, item.Sections, 1)
+	require.Equal(t, "section-1", item.Sections[0].ID)
+	require.Equal(t, "Credentials", item.Sections[0].Title)
+
+	require.Len(t, item.Fields, 2)
+	require.Equal(t, "field-1", item.Fields[0].ID)
+	require.Equal(t, "section-1", item.Fields[0].SectionID)
+	require.Equal(t, "Text", item.Fields[0].FieldType)
+	require.Equal(t, "field-2", item.Fields[1].ID)
+	require.Equal(t, "section-1", item.Fields[1].SectionID)
+	require.Equal(t, "Concealed", item.Fields[1].FieldType)
+}
+
+func TestItem_FromConnectItem_WithSections(t *testing.T) {
+	connectItem := &connect.Item{
+		ID: "test-item-id",
+		Vault: connect.ItemVault{
+			ID: "test-vault-id",
+		},
+		Version: 1,
+		Tags:    []string{"tag1"},
+		Fields: []*connect.ItemField{
+			{
+				ID:    "field-1",
+				Label: "username",
+				Value: "testuser",
+				Section: &connect.ItemSection{
+					ID:    "section-1",
+					Label: "Credentials",
+				},
+				Type: connect.ItemFieldType("STRING"),
+			},
+			{
+				ID:    "field-2",
+				Label: "password",
+				Value: "testpass",
+				Section: &connect.ItemSection{
+					ID:    "section-1",
+					Label: "Credentials",
+				},
+				Type: connect.ItemFieldType("CONCEALED"),
+			},
+		},
+		CreatedAt: time.Now(),
+	}
+
+	item := &Item{}
+	item.FromConnectItem(connectItem)
+
+	require.Len(t, item.Sections, 1)
+	require.Equal(t, "section-1", item.Sections[0].ID)
+	require.Equal(t, "Credentials", item.Sections[0].Title)
+
+	require.Len(t, item.Fields, 2)
+	require.Equal(t, "field-1", item.Fields[0].ID)
+	require.Equal(t, "section-1", item.Fields[0].SectionID)
+	require.Equal(t, "STRING", item.Fields[0].FieldType)
+	require.Equal(t, "field-2", item.Fields[1].ID)
+	require.Equal(t, "section-1", item.Fields[1].SectionID)
+	require.Equal(t, "CONCEALED", item.Fields[1].FieldType)
+}
+
 func TestItem_FromSDKItemOverview(t *testing.T) {
 	sdkItemOverview := &sdk.ItemOverview{
 		ID:        "test-item-id",

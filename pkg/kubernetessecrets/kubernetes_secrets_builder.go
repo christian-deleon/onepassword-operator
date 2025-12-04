@@ -8,7 +8,9 @@ import (
 	"regexp"
 	"strings"
 
+	onepasswordv1 "github.com/1Password/onepassword-operator/api/v1"
 	"github.com/1Password/onepassword-operator/pkg/onepassword/model"
+	"github.com/1Password/onepassword-operator/pkg/template"
 	"github.com/1Password/onepassword-operator/pkg/utils"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -40,6 +42,8 @@ func CreateKubernetesSecretFromItem(
 	secretAnnotations map[string]string,
 	secretType string,
 	ownerRef *metav1.OwnerReference,
+	secretTemplate *onepasswordv1.SecretTemplate,
+	imagePullSecret *onepasswordv1.ImagePullSecretConfig,
 ) error {
 	itemVersion := fmt.Sprint(item.Version)
 	if secretAnnotations == nil {
@@ -60,7 +64,7 @@ func CreateKubernetesSecretFromItem(
 
 	// "Opaque" and "" secret types are treated the same by Kubernetes.
 	secret := BuildKubernetesSecretFromOnePasswordItem(secretName, namespace, secretAnnotations, labels,
-		secretType, *item, ownerRef)
+		secretType, *item, ownerRef, secretTemplate, imagePullSecret)
 
 	currentSecret := &corev1.Secret{}
 	err := kubeClient.Get(ctx, types.NamespacedName{Name: secret.Name, Namespace: secret.Namespace}, currentSecret)
@@ -111,6 +115,8 @@ func BuildKubernetesSecretFromOnePasswordItem(
 	secretType string,
 	item model.Item,
 	ownerRef *metav1.OwnerReference,
+	secretTemplate *onepasswordv1.SecretTemplate,
+	imagePullSecret *onepasswordv1.ImagePullSecretConfig,
 ) *corev1.Secret {
 	var ownerRefs []metav1.OwnerReference
 	if ownerRef != nil {
@@ -125,20 +131,66 @@ func BuildKubernetesSecretFromOnePasswordItem(
 			Labels:          labels,
 			OwnerReferences: ownerRefs,
 		},
-		Data: BuildKubernetesSecretData(item.Fields, item.Files),
+		Data: BuildKubernetesSecretData(item, secretTemplate, imagePullSecret),
 		Type: corev1.SecretType(secretType),
 	}
 }
 
-func BuildKubernetesSecretData(fields []model.ItemField, files []model.File) map[string][]byte {
+func BuildKubernetesSecretData(
+	item model.Item,
+	secretTemplate *onepasswordv1.SecretTemplate,
+	imagePullSecret *onepasswordv1.ImagePullSecretConfig,
+) map[string][]byte {
 	secretData := map[string][]byte{}
-	for i := 0; i < len(fields); i++ {
-		key := formatSecretDataName(fields[i].Label)
-		secretData[key] = []byte(fields[i].Value)
+
+	// Priority 1: Image Pull Secret handling
+	if imagePullSecret != nil {
+		// Build field lookup map
+		fieldMap := make(map[string]string)
+		for _, field := range item.Fields {
+			fieldMap[field.Label] = field.Value
+		}
+
+		// Extract values from fields
+		registry := fieldMap[imagePullSecret.RegistryField]
+		username := fieldMap[imagePullSecret.UsernameField]
+		password := fieldMap[imagePullSecret.PasswordField]
+		email := fieldMap[imagePullSecret.EmailField]
+
+		// Build dockerconfigjson
+		dockerConfigJSON, err := template.BuildDockerConfigJSON(registry, username, password, email)
+		if err != nil {
+			log.Error(err, "Failed to build docker config json, falling back to default behavior")
+			// Fall through to default behavior
+		} else {
+			secretData[".dockerconfigjson"] = dockerConfigJSON
+			return secretData
+		}
 	}
 
-	// populate unpopulated fields from files
-	for _, file := range files {
+	// Priority 2: Template processing
+	if secretTemplate != nil && secretTemplate.Data != nil {
+		ctx := template.BuildTemplateContext(&item)
+		for key, tmplStr := range secretTemplate.Data {
+			processed, err := template.ProcessTemplate(tmplStr, ctx)
+			if err != nil {
+				log.Error(err, fmt.Sprintf("Failed to process template for key '%s', skipping", key))
+				continue
+			}
+			secretData[formatSecretDataName(key)] = processed
+		}
+		return secretData
+	}
+
+	// Priority 3: Default behavior (backward compatible)
+	// Map all fields to secret keys
+	for i := 0; i < len(item.Fields); i++ {
+		key := formatSecretDataName(item.Fields[i].Label)
+		secretData[key] = []byte(item.Fields[i].Value)
+	}
+
+	// Populate unpopulated fields from files
+	for _, file := range item.Files {
 		content, err := file.Content()
 		if err != nil {
 			log.Error(err, fmt.Sprintf("Could not load contents of file %s", file.Name))
