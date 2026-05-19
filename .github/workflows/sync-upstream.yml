@@ -1,12 +1,12 @@
 name: Sync Upstream
 
+# This workflow has been disabled
 on:
-  schedule:
-    - cron: "0 6 * * *" # Daily at 06:00 UTC
-  workflow_dispatch:
+  workflow_dispatch:  # Only allow manual runs if needed
 
 jobs:
   sync:
+    if: false  # Completely disabled
     runs-on: ubuntu-latest
     permissions:
       contents: write
